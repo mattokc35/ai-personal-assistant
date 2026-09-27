@@ -1,7 +1,38 @@
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+
+function parseClientDatetime(datetime?: string, timezoneOffsetMinutes?: number) {
+  if (!datetime) return null;
+
+  const includesTimezone = /(?:Z|[+-]\d{2}:\d{2})$/.test(datetime);
+  if (includesTimezone) {
+    const directDate = new Date(datetime);
+    return Number.isNaN(directDate.getTime()) ? null : directDate;
+  }
+
+  const match = datetime.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/
+  );
+  if (!match) return null;
+
+  const [, year, month, day, hour, minute, second = "0"] = match;
+  const offset = Number.isFinite(timezoneOffsetMinutes) ? Number(timezoneOffsetMinutes) : 0;
+  const utcMs =
+    Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second)
+    ) +
+    offset * 60_000;
+
+  return new Date(utcMs);
+}
 
 export async function GET() {
   const reminders = await prisma.reminder.findMany({
@@ -15,10 +46,11 @@ export async function POST(request: Request) {
     title?: string;
     datetime?: string;
     notes?: string;
+    timezoneOffsetMinutes?: number;
   };
 
   const title = body.title?.trim();
-  const datetime = body.datetime ? new Date(body.datetime) : null;
+  const datetime = parseClientDatetime(body.datetime, body.timezoneOffsetMinutes);
 
   if (!title || !datetime || Number.isNaN(datetime.getTime())) {
     return NextResponse.json(
@@ -44,6 +76,7 @@ export async function PUT(request: Request) {
     title?: string;
     datetime?: string;
     notes?: string;
+    timezoneOffsetMinutes?: number;
   };
 
   if (!body.id) {
@@ -61,8 +94,8 @@ export async function PUT(request: Request) {
   }
 
   if (typeof body.datetime === "string") {
-    const parsed = new Date(body.datetime);
-    if (Number.isNaN(parsed.getTime())) {
+    const parsed = parseClientDatetime(body.datetime, body.timezoneOffsetMinutes);
+    if (!parsed || Number.isNaN(parsed.getTime())) {
       return NextResponse.json({ error: "Invalid datetime." }, { status: 400 });
     }
     data.datetime = parsed;
@@ -72,12 +105,22 @@ export async function PUT(request: Request) {
     data.notes = body.notes.trim() || null;
   }
 
-  const reminder = await prisma.reminder.update({
-    where: { id: Number(body.id) },
-    data,
-  });
+  try {
+    const reminder = await prisma.reminder.update({
+      where: { id: Number(body.id) },
+      data,
+    });
 
-  return NextResponse.json({ reminder });
+    return NextResponse.json({ reminder });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2025"
+    ) {
+      return NextResponse.json({ error: "Reminder not found." }, { status: 404 });
+    }
+    throw error;
+  }
 }
 
 export async function DELETE(request: Request) {
@@ -88,6 +131,16 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "A numeric id is required." }, { status: 400 });
   }
 
-  await prisma.reminder.delete({ where: { id } });
-  return NextResponse.json({ success: true });
+  try {
+    await prisma.reminder.delete({ where: { id } });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2025"
+    ) {
+      return NextResponse.json({ error: "Reminder not found." }, { status: 404 });
+    }
+    throw error;
+  }
 }

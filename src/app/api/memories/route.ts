@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -56,12 +57,22 @@ export async function PUT(request: Request) {
     data.content = content;
   }
 
-  const memory = await prisma.memory.update({
-    where: { id: Number(body.id) },
-    data,
-  });
+  try {
+    const memory = await prisma.memory.update({
+      where: { id: Number(body.id) },
+      data,
+    });
 
-  return NextResponse.json({ memory });
+    return NextResponse.json({ memory });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2025"
+    ) {
+      return NextResponse.json({ error: "Memory not found." }, { status: 404 });
+    }
+    throw error;
+  }
 }
 
 export async function DELETE(request: Request) {
@@ -72,6 +83,16 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "A numeric id is required." }, { status: 400 });
   }
 
-  await prisma.memory.delete({ where: { id } });
-  return NextResponse.json({ success: true });
+  try {
+    await prisma.memory.delete({ where: { id } });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2025"
+    ) {
+      return NextResponse.json({ error: "Memory not found." }, { status: 404 });
+    }
+    throw error;
+  }
 }

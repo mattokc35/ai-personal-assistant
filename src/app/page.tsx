@@ -214,9 +214,13 @@ export default function Home() {
         }),
       });
 
-      if (!response.ok || !response.body) {
+      if (!response.ok) {
         const data = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error ?? "Chat request failed.");
+      }
+
+      if (!response.body) {
+        throw new Error("Streaming response was unavailable.");
       }
 
       const reader = response.body.getReader();
@@ -280,7 +284,8 @@ export default function Home() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: reminderTitle,
-        datetime: new Date(reminderDatetime).toISOString(),
+        datetime: reminderDatetime,
+        timezoneOffsetMinutes: new Date().getTimezoneOffset(),
         notes: reminderNotes,
       }),
     });
@@ -329,7 +334,13 @@ export default function Home() {
     await fetch("/api/reminders", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: reminder.id, title, datetime, notes }),
+      body: JSON.stringify({
+        id: reminder.id,
+        title,
+        datetime,
+        notes,
+        timezoneOffsetMinutes: new Date().getTimezoneOffset(),
+      }),
     });
 
     await loadReminders();

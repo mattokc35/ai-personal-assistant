@@ -76,12 +76,14 @@ Current reminders:\n${reminderContext || "(none)"}`;
 
   let finalText = "";
   let iterations = 0;
+  let previousResponseId: string | undefined;
 
   while (iterations < 6) {
     iterations += 1;
     const response = await openai.responses.create({
       model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
       input,
+      previous_response_id: previousResponseId,
       tools: toolDefinitions as unknown as OpenAI.Responses.Tool[],
       tool_choice: "auto",
       temperature: 0.4,
@@ -126,6 +128,7 @@ Current reminders:\n${reminderContext || "(none)"}`;
     );
 
     input = toolOutputs;
+    previousResponseId = response.id;
   }
 
   if (!finalText) {
