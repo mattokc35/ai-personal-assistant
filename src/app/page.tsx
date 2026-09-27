@@ -329,12 +329,24 @@ export default function Home() {
   };
 
   const deleteReminder = async (id: number) => {
-    await fetch(`/api/reminders?id=${id}`, { method: "DELETE" });
+    const response = await fetch(`/api/reminders?id=${id}`, { method: "DELETE" });
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      setError(data.error ?? "Failed to delete reminder.");
+      return;
+    }
+    setError(null);
     await loadReminders();
   };
 
   const deleteMemory = async (id: number) => {
-    await fetch(`/api/memories?id=${id}`, { method: "DELETE" });
+    const response = await fetch(`/api/memories?id=${id}`, { method: "DELETE" });
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      setError(data.error ?? "Failed to delete memory.");
+      return;
+    }
+    setError(null);
     await loadMemories();
   };
 
@@ -352,7 +364,7 @@ export default function Home() {
 
     const notes = window.prompt("Reminder notes", reminder.notes ?? "") ?? "";
 
-    await fetch("/api/reminders", {
+    const response = await fetch("/api/reminders", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -364,6 +376,13 @@ export default function Home() {
       }),
     });
 
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      setError(data.error ?? "Failed to update reminder.");
+      return;
+    }
+
+    setError(null);
     await loadReminders();
   };
 
@@ -372,12 +391,19 @@ export default function Home() {
     const content = window.prompt("Memory content", memory.content);
     if (!content) return;
 
-    await fetch("/api/memories", {
+    const response = await fetch("/api/memories", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: memory.id, key, content }),
     });
 
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      setError(data.error ?? "Failed to update memory.");
+      return;
+    }
+
+    setError(null);
     await loadMemories();
   };
 

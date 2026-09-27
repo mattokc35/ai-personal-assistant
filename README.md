@@ -32,7 +32,7 @@ A polished, demo-ready AI personal assistant built with **Next.js App Router**, 
 - **Framework:** Next.js 16 (App Router)
 - **Language:** TypeScript
 - **Styling:** Tailwind CSS v4
-- **AI:** OpenAI Responses API + tool calling
+- **AI:** OpenAI Chat Completions API + tool calling
 - **Database:** Prisma ORM + SQLite
 
 ## Environment Variables
@@ -85,7 +85,7 @@ Required/optional vars:
 - **Chat API (`src/app/api/chat/route.ts`)**
   - Receives chat messages
   - Builds system context from saved reminders/memories
-  - Calls OpenAI Responses API with tool definitions
+  - Calls OpenAI Chat Completions API with tool definitions
   - Executes tool calls server-side and streams final response chunks back to UI
 - **Tool executor (`src/lib/assistant-tools.ts`)**
   - Implements: `web_search`, `get_weather`, `create_reminder`, `list_reminders`, `delete_reminder`, `save_memory`, `list_memories`, `delete_memory`
