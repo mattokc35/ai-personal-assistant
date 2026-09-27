@@ -64,13 +64,19 @@ Required/optional vars:
    cp .env.example .env
    ```
 
-3. Run Prisma migration:
+3. Generate Prisma client:
+
+   ```bash
+   npm run prisma:generate
+   ```
+
+4. Run Prisma migration:
 
    ```bash
    npx prisma migrate dev
    ```
 
-4. Start dev server:
+5. Start dev server:
 
    ```bash
    npm run dev

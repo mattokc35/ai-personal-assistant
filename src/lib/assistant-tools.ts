@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/prisma";
+import { parseClientDatetime } from "@/lib/datetime";
+import OpenAI from "openai";
 
 type Json = Record<string, unknown>;
 
@@ -44,6 +46,11 @@ export const toolDefinitions = [
         datetime: {
           type: "string",
           description: "ISO-8601 date/time string",
+        },
+        timezoneOffsetMinutes: {
+          type: "number",
+          description:
+            "Optional timezone offset in minutes (UTC - local), used for local datetime strings.",
         },
         notes: { type: "string" },
       },
@@ -108,6 +115,16 @@ export const toolDefinitions = [
     },
   },
 ] as const;
+
+export const chatToolDefinitions: OpenAI.Chat.Completions.ChatCompletionTool[] =
+  toolDefinitions.map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    },
+  }));
 
 async function webSearch(query: string): Promise<Json> {
   const apiKey = process.env.TAVILY_API_KEY;
@@ -212,8 +229,11 @@ export async function executeTool(name: string, args: Json): Promise<Json> {
     case "get_weather":
       return getWeather(String(args.location ?? ""));
     case "create_reminder": {
-      const datetime = new Date(String(args.datetime ?? ""));
-      if (Number.isNaN(datetime.getTime())) {
+      const datetime = parseClientDatetime(
+        String(args.datetime ?? ""),
+        Number(args.timezoneOffsetMinutes)
+      );
+      if (!datetime || Number.isNaN(datetime.getTime())) {
         return { error: "Invalid datetime. Please provide an ISO-8601 date/time." };
       }
 

@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
-import { executeTool } from "@/lib/assistant-tools";
+import { chatToolDefinitions, executeTool } from "@/lib/assistant-tools";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -16,112 +16,6 @@ type StreamEvent =
   | { type: "error"; error: string };
 
 const encoder = new TextEncoder();
-
-const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
-  {
-    type: "function",
-    function: {
-      name: "web_search",
-      description: "Search the web for up-to-date information.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "The search query." },
-        },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_weather",
-      description: "Get current weather and short forecast for a city or location.",
-      parameters: {
-        type: "object",
-        properties: {
-          location: { type: "string", description: "City or place name" },
-        },
-        required: ["location"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "create_reminder",
-      description: "Create a reminder with title, date/time, and optional notes.",
-      parameters: {
-        type: "object",
-        properties: {
-          title: { type: "string" },
-          datetime: { type: "string", description: "ISO-8601 date/time string" },
-          notes: { type: "string" },
-        },
-        required: ["title", "datetime"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "list_reminders",
-      description: "List reminders sorted by date/time.",
-      parameters: { type: "object", properties: {} },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "delete_reminder",
-      description: "Delete a reminder by id.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "number" },
-        },
-        required: ["id"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "save_memory",
-      description: "Save a user fact/memory for future chats.",
-      parameters: {
-        type: "object",
-        properties: {
-          key: { type: "string", description: "Optional label" },
-          content: { type: "string", description: "Fact to remember" },
-        },
-        required: ["content"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "list_memories",
-      description: "List saved user memories.",
-      parameters: { type: "object", properties: {} },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "delete_memory",
-      description: "Delete a saved memory by id.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "number" },
-        },
-        required: ["id"],
-      },
-    },
-  },
-];
 
 function writeEvent(
   controller: ReadableStreamDefaultController<Uint8Array>,
@@ -185,7 +79,7 @@ async function prepareConversationWithTools(
     const completion = await openai.chat.completions.create({
       model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
       messages: conversation,
-      tools,
+      tools: chatToolDefinitions,
       tool_choice: "auto",
       temperature: 0.4,
     });
