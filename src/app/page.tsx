@@ -81,6 +81,7 @@ export default function Home() {
   const endRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const assistantContentRef = useRef("");
+  const messagesRef = useRef<ChatMessage[]>([]);
 
   const statusText = useMemo(() => {
     if (thinking) return "Thinking...";
@@ -102,6 +103,10 @@ export default function Home() {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, thinking]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   useEffect(() => {
     return () => {
@@ -207,7 +212,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: [...messages, userMessage].map((message) => ({
+          messages: [...messagesRef.current, userMessage].map((message) => ({
             role: message.role,
             content: message.content,
           })),
@@ -279,7 +284,7 @@ export default function Home() {
 
   const addReminder = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await fetch("/api/reminders", {
+    const response = await fetch("/api/reminders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -290,6 +295,13 @@ export default function Home() {
       }),
     });
 
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      setError(data.error ?? "Failed to create reminder.");
+      return;
+    }
+
+    setError(null);
     setReminderTitle("");
     setReminderDatetime("");
     setReminderNotes("");
@@ -298,12 +310,19 @@ export default function Home() {
 
   const addMemory = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await fetch("/api/memories", {
+    const response = await fetch("/api/memories", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key: memoryKey, content: memoryContent }),
     });
 
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      setError(data.error ?? "Failed to save memory.");
+      return;
+    }
+
+    setError(null);
     setMemoryKey("");
     setMemoryContent("");
     await loadMemories();
@@ -324,8 +343,10 @@ export default function Home() {
     if (!title) return;
 
     const datetime = window.prompt(
-      "Reminder datetime (ISO)",
-      new Date(reminder.datetime).toISOString()
+      "Reminder datetime (YYYY-MM-DDTHH:mm)",
+      new Date(new Date(reminder.datetime).getTime() - new Date().getTimezoneOffset() * 60_000)
+        .toISOString()
+        .slice(0, 16)
     );
     if (!datetime) return;
 

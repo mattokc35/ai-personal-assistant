@@ -1,5 +1,6 @@
 import OpenAI from "openai";
-import { executeTool, toolDefinitions } from "@/lib/assistant-tools";
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import { executeTool } from "@/lib/assistant-tools";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
@@ -16,15 +17,117 @@ type StreamEvent =
 
 const encoder = new TextEncoder();
 
+const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+  {
+    type: "function",
+    function: {
+      name: "web_search",
+      description: "Search the web for up-to-date information.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The search query." },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_weather",
+      description: "Get current weather and short forecast for a city or location.",
+      parameters: {
+        type: "object",
+        properties: {
+          location: { type: "string", description: "City or place name" },
+        },
+        required: ["location"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_reminder",
+      description: "Create a reminder with title, date/time, and optional notes.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          datetime: { type: "string", description: "ISO-8601 date/time string" },
+          notes: { type: "string" },
+        },
+        required: ["title", "datetime"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_reminders",
+      description: "List reminders sorted by date/time.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_reminder",
+      description: "Delete a reminder by id.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "number" },
+        },
+        required: ["id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "save_memory",
+      description: "Save a user fact/memory for future chats.",
+      parameters: {
+        type: "object",
+        properties: {
+          key: { type: "string", description: "Optional label" },
+          content: { type: "string", description: "Fact to remember" },
+        },
+        required: ["content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_memories",
+      description: "List saved user memories.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_memory",
+      description: "Delete a saved memory by id.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "number" },
+        },
+        required: ["id"],
+      },
+    },
+  },
+];
+
 function writeEvent(
   controller: ReadableStreamDefaultController<Uint8Array>,
   event: StreamEvent
 ) {
   controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
-}
-
-function splitForStreaming(text: string): string[] {
-  return text.split(/(\s+)/).filter(Boolean);
 }
 
 function normalizeMessages(messages: ChatMessage[]): ChatMessage[] {
@@ -36,9 +139,7 @@ function normalizeMessages(messages: ChatMessage[]): ChatMessage[] {
   );
 }
 
-async function runAssistant(messages: ChatMessage[]) {
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
+async function buildConversation(messages: ChatMessage[]): Promise<ChatCompletionMessageParam[]> {
   const [memories, reminders] = await Promise.all([
     prisma.memory.findMany({ orderBy: { createdAt: "desc" }, take: 10 }),
     prisma.reminder.findMany({ orderBy: { datetime: "asc" }, take: 10 }),
@@ -63,79 +164,74 @@ If web search is unavailable, explain how to configure TAVILY_API_KEY.
 Current saved memories:\n${memoryContext || "(none)"}
 Current reminders:\n${reminderContext || "(none)"}`;
 
-  let input = [
-    {
-      role: "system",
-      content: [{ type: "input_text", text: systemPrompt }],
-    },
-    ...messages.map((message) => ({
-      role: message.role,
-      content: [{ type: "input_text", text: message.content }],
-    })),
-  ] as OpenAI.Responses.ResponseInput;
+  return [
+    { role: "system", content: systemPrompt },
+    ...messages.map((message) => ({ role: message.role, content: message.content })),
+  ];
+}
 
-  let finalText = "";
-  let iterations = 0;
-  let previousResponseId: string | undefined;
+async function prepareConversationWithTools(
+  openai: OpenAI,
+  conversation: ChatCompletionMessageParam[]
+): Promise<ChatCompletionMessageParam[]> {
+  let iteration = 0;
 
-  while (iterations < 6) {
-    iterations += 1;
-    const response = await openai.responses.create({
+  while (iteration < 6) {
+    iteration += 1;
+
+    const completion = await openai.chat.completions.create({
       model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
-      input,
-      previous_response_id: previousResponseId,
-      tools: toolDefinitions as unknown as OpenAI.Responses.Tool[],
+      messages: conversation,
+      tools,
       tool_choice: "auto",
       temperature: 0.4,
     });
 
-    const functionCalls = response.output.filter(
-      (item): item is OpenAI.Responses.ResponseFunctionToolCall =>
-        item.type === "function_call"
-    );
-
-    if (functionCalls.length === 0) {
-      finalText = response.output_text || "I could not generate a response.";
+    const assistantMessage = completion.choices[0]?.message;
+    if (!assistantMessage) {
       break;
     }
 
-    const toolOutputs = await Promise.all(
-      functionCalls.map(async (call) => {
-        let parsedArgs: Record<string, unknown> = {};
-        try {
-          parsedArgs = call.arguments ? (JSON.parse(call.arguments) as Record<string, unknown>) : {};
-        } catch {
-          parsedArgs = {};
-        }
+    if (!assistantMessage.tool_calls?.length) {
+      break;
+    }
 
-        try {
-          const result = await executeTool(call.name, parsedArgs);
-          return {
-            type: "function_call_output" as const,
-            call_id: call.call_id,
-            output: JSON.stringify(result),
-          };
-        } catch (error) {
-          return {
-            type: "function_call_output" as const,
-            call_id: call.call_id,
-            output: JSON.stringify({
-              error: error instanceof Error ? error.message : "Tool execution failed.",
-            }),
-          };
-        }
-      })
-    );
+    conversation.push({
+      role: "assistant",
+      content: assistantMessage.content ?? "",
+      tool_calls: assistantMessage.tool_calls,
+    });
 
-    input = toolOutputs;
-    previousResponseId = response.id;
+    for (const call of assistantMessage.tool_calls) {
+      if (call.type !== "function") {
+        continue;
+      }
+
+      let parsedArgs: Record<string, unknown> = {};
+      try {
+        parsedArgs = JSON.parse(call.function.arguments || "{}") as Record<string, unknown>;
+      } catch {
+        parsedArgs = {};
+      }
+
+      let result: unknown;
+      try {
+        result = await executeTool(call.function.name, parsedArgs);
+      } catch (error) {
+        result = {
+          error: error instanceof Error ? error.message : "Tool execution failed.",
+        };
+      }
+
+      conversation.push({
+        role: "tool",
+        tool_call_id: call.id,
+        content: JSON.stringify(result),
+      });
+    }
   }
 
-  if (!finalText) {
-    finalText = "I reached my tool-calling limit for this request. Please try again.";
-  }
-
-  return finalText;
+  return conversation;
 }
 
 export async function POST(request: Request) {
@@ -155,10 +251,27 @@ export async function POST(request: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        const responseText = await runAssistant(messages);
-        for (const chunk of splitForStreaming(responseText)) {
-          writeEvent(controller, { type: "delta", content: chunk });
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const baseConversation = await buildConversation(messages);
+        const preparedConversation = await prepareConversationWithTools(
+          openai,
+          baseConversation
+        );
+
+        const completionStream = await openai.chat.completions.create({
+          model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+          messages: preparedConversation,
+          stream: true,
+          temperature: 0.4,
+        });
+
+        for await (const part of completionStream) {
+          const content = part.choices[0]?.delta?.content;
+          if (content) {
+            writeEvent(controller, { type: "delta", content });
+          }
         }
+
         writeEvent(controller, { type: "done" });
       } catch (error) {
         writeEvent(controller, {
