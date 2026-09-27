@@ -39,7 +39,8 @@ export async function PUT(request: Request) {
     content?: string;
   };
 
-  if (!body.id) {
+  const id = Number(body.id);
+  if (!Number.isFinite(id)) {
     return NextResponse.json({ error: "id is required." }, { status: 400 });
   }
 
@@ -59,7 +60,7 @@ export async function PUT(request: Request) {
 
   try {
     const memory = await prisma.memory.update({
-      where: { id: Number(body.id) },
+      where: { id },
       data,
     });
 

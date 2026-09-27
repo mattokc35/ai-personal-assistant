@@ -28,7 +28,7 @@ type SpeechRecognitionInstance = {
   interimResults: boolean;
   lang: string;
   onresult: ((event: SpeechRecognitionEvent) => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
   onend: (() => void) | null;
   start: () => void;
   stop: () => void;
@@ -43,6 +43,11 @@ type SpeechRecognitionEvent = {
       transcript: string;
     };
   }>;
+};
+
+type SpeechRecognitionErrorEvent = {
+  error: string;
+  message?: string;
 };
 
 const EXAMPLE_PROMPTS = [
@@ -154,9 +159,10 @@ export default function Home() {
       setInput((current) => `${current} ${transcript}`.trim());
     };
 
-    recognition.onerror = () => {
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       setListening(false);
-      setError("Unable to capture voice input. Please try again.");
+      const reason = event.message || event.error || "unknown_error";
+      setError(`Unable to capture voice input (${reason}).`);
     };
 
     recognition.onend = () => {
@@ -243,10 +249,19 @@ export default function Home() {
 
         for (const line of lines) {
           if (!line.trim()) continue;
-          const event = JSON.parse(line) as
+          let event:
             | { type: "delta"; content: string }
             | { type: "error"; error: string }
             | { type: "done" };
+
+          try {
+            event = JSON.parse(line) as
+              | { type: "delta"; content: string }
+              | { type: "error"; error: string }
+              | { type: "done" };
+          } catch {
+            throw new Error("Received malformed streaming data.");
+          }
 
           if (event.type === "delta") {
             assistantContentRef.current = `${assistantContentRef.current}${event.content}`;

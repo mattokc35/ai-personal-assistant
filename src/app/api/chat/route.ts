@@ -142,7 +142,15 @@ export async function POST(request: Request) {
     );
   }
 
-  const body = (await request.json()) as { messages?: ChatMessage[] };
+  let body: { messages?: ChatMessage[] };
+  try {
+    body = (await request.json()) as { messages?: ChatMessage[] };
+  } catch {
+    return Response.json(
+      { error: "Invalid request payload. Expected JSON body." },
+      { status: 400 }
+    );
+  }
   const messages = normalizeMessages(body.messages ?? []);
 
   const stream = new ReadableStream<Uint8Array>({
